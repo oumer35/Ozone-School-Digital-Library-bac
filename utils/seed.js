@@ -292,15 +292,19 @@ async function seed() {
   console.log('🌱 Seeding database...\n');
 
   try {
-    // Clear existing data
+    // Clear existing data in correct order (child tables first)
     console.log('Clearing existing data...');
-    await db.query('DELETE FROM security_logs');
-    await db.query('DELETE FROM audit_logs');
     await db.query('DELETE FROM reviews');
     await db.query('DELETE FROM bookings');
     await db.query('DELETE FROM books');
     await db.query('DELETE FROM categories');
     await db.query('DELETE FROM users');
+    // Reset sequences
+    await db.query('ALTER SEQUENCE IF EXISTS users_id_seq RESTART WITH 1');
+    await db.query('ALTER SEQUENCE IF EXISTS categories_id_seq RESTART WITH 1');
+    await db.query('ALTER SEQUENCE IF EXISTS books_id_seq RESTART WITH 1');
+    await db.query('ALTER SEQUENCE IF EXISTS bookings_id_seq RESTART WITH 1');
+    await db.query('ALTER SEQUENCE IF EXISTS reviews_id_seq RESTART WITH 1');
     console.log('✅ Existing data cleared\n');
 
     // Create users
@@ -310,9 +314,6 @@ async function seed() {
     const users = [
       { name: 'Admin User', email: 'admin@library.com', role: 'librarian' },
       { name: 'John Doe', email: 'john@example.com', role: 'user' },
-      { name: 'Jane Smith', email: 'jane@example.com', role: 'user' },
-      { name: 'Bob Johnson', email: 'bob@example.com', role: 'user' },
-      { name: 'Alice Brown', email: 'alice@example.com', role: 'user' },
     ];
 
     for (const user of users) {
@@ -323,59 +324,54 @@ async function seed() {
       console.log(`   ✅ Created: ${user.email} (${user.role})`);
     }
 
-    // Create categories
+    // Create categories - they will get IDs 1, 2, 3, 4
     console.log('\nCreating categories...');
-    const categories = [
-      'Technology',
-      'Science',
-      'Literature',
-      'History',
-      'Mathematics',
-      'Philosophy',
-      'Arts',
-      'Business',
-    ];
+    const categoryNames = ['Technology', 'Science', 'Literature', 'History'];
+    const categoryIds = {};
 
-    for (const cat of categories) {
-      await db.query(
-        'INSERT INTO categories (name, description) VALUES ($1, $2)',
+    for (const cat of categoryNames) {
+      const result = await db.query(
+        'INSERT INTO categories (name, description) VALUES ($1, $2) RETURNING id',
         [cat, `Books about ${cat.toLowerCase()}`]
       );
+      categoryIds[cat] = result.rows[0].id;
+      console.log(`   ✅ Created: ${cat} (ID: ${categoryIds[cat]})`);
     }
-    console.log(`   ✅ Created ${categories.length} categories`);
 
-    // Create books
+    // Create books using the returned category IDs
     console.log('\nCreating books...');
     const books = [
-      { title: 'Clean Code', author: 'Robert C. Martin', category_id: 1, copies: 5 },
-      { title: 'Design Patterns', author: 'Gang of Four', category_id: 1, copies: 3 },
-      { title: 'A Brief History of Time', author: 'Stephen Hawking', category_id: 2, copies: 4 },
-      { title: 'To Kill a Mockingbird', author: 'Harper Lee', category_id: 3, copies: 6 },
-      { title: '1984', author: 'George Orwell', category_id: 3, copies: 5 },
-      { title: 'The Art of War', author: 'Sun Tzu', category_id: 6, copies: 3 },
-      { title: 'Thinking, Fast and Slow', author: 'Daniel Kahneman', category_id: 6, copies: 4 },
-      { title: 'The Lean Startup', author: 'Eric Ries', category_id: 8, copies: 3 },
+      { title: 'Clean Code', author: 'Robert C. Martin', category: 'Technology', copies: 5 },
+      { title: 'Design Patterns', author: 'Gang of Four', category: 'Technology', copies: 3 },
+      { title: 'Introduction to Algorithms', author: 'Thomas H. Cormen', category: 'Technology', copies: 4 },
+      { title: 'A Brief History of Time', author: 'Stephen Hawking', category: 'Science', copies: 6 },
+      { title: 'The Selfish Gene', author: 'Richard Dawkins', category: 'Science', copies: 3 },
+      { title: 'To Kill a Mockingbird', author: 'Harper Lee', category: 'Literature', copies: 8 },
+      { title: '1984', author: 'George Orwell', category: 'Literature', copies: 7 },
+      { title: 'The Art of War', author: 'Sun Tzu', category: 'History', copies: 4 },
     ];
 
     for (const book of books) {
+      const catId = categoryIds[book.category];
+      if (!catId) {
+        console.log(`   ⚠️ Skipping "${book.title}" - category "${book.category}" not found`);
+        continue;
+      }
       await db.query(
         `INSERT INTO books (title, author, category_id, total_copies, available_copies)
          VALUES ($1, $2, $3, $4, $4)`,
-        [book.title, book.author, book.category_id, book.copies]
+        [book.title, book.author, catId, book.copies]
       );
+      console.log(`   ✅ Created: ${book.title} (Category: ${book.category}, Copies: ${book.copies})`);
     }
-    console.log(`   ✅ Created ${books.length} books`);
 
     console.log('\n🎉 Database seeded successfully!');
     console.log('\n📝 Login Credentials:');
     console.log('   Admin: admin@library.com / Password@123');
     console.log('   User:  john@example.com / Password@123');
-    console.log('   User:  jane@example.com / Password@123');
-    console.log('   User:  bob@example.com / Password@123');
-    console.log('   User:  alice@example.com / Password@123');
 
   } catch (error) {
-    console.error('❌ Seeding failed:', error.message);
+    console.error('\n❌ Seeding failed:', error.message);
     console.error('Full error:', error);
   }
   
