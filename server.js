@@ -160,133 +160,128 @@ const server = http.createServer(app);
 // ==================== DATABASE INITIALIZATION ====================
 async function initializeDatabase() {
   const db = require('./config/db');
-  const bcrypt = require('bcryptjs');
   
-  console.log('🔧 Checking database...');
+  console.log('🔧 Checking database connection...');
   
   try {
-    // Create tables
-    await db.query(`
-      CREATE TABLE IF NOT EXISTS users (
-        id SERIAL PRIMARY KEY,
-        name VARCHAR(255) NOT NULL,
-        email VARCHAR(255) UNIQUE NOT NULL,
-        password VARCHAR(255) NOT NULL,
-        role VARCHAR(50) DEFAULT 'user',
-        is_active BOOLEAN DEFAULT true,
-        reset_token VARCHAR(255),
-        otp_code VARCHAR(6),
-        otp_expiry TIMESTAMP,
-        refresh_token TEXT,
-        failed_login_attempts INTEGER DEFAULT 0,
-        locked_until TIMESTAMP,
-        last_login TIMESTAMP,
-        phone VARCHAR(20),
-        avatar_url TEXT,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
-    console.log('✅ Users table ready');
-
-    await db.query(`
-      CREATE TABLE IF NOT EXISTS categories (
-        id SERIAL PRIMARY KEY,
-        name VARCHAR(100) NOT NULL,
-        description TEXT,
-        is_active BOOLEAN DEFAULT true,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
-    console.log('✅ Categories table ready');
-
-    await db.query(`
-      CREATE TABLE IF NOT EXISTS books (
-        id SERIAL PRIMARY KEY,
-        title VARCHAR(255) NOT NULL,
-        author VARCHAR(255) NOT NULL,
-        isbn VARCHAR(20) UNIQUE,
-        publisher VARCHAR(255),
-        publication_year INTEGER,
-        description TEXT,
-        category_id INTEGER REFERENCES categories(id),
-        total_copies INTEGER DEFAULT 1,
-        available_copies INTEGER DEFAULT 1,
-        cover_image TEXT,
-        location VARCHAR(100),
-        is_active BOOLEAN DEFAULT true,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
-    console.log('✅ Books table ready');
-
-    await db.query(`
-      CREATE TABLE IF NOT EXISTS bookings (
-        id SERIAL PRIMARY KEY,
-        user_id INTEGER REFERENCES users(id),
-        book_id INTEGER REFERENCES books(id),
-        issue_date DATE DEFAULT CURRENT_DATE,
-        due_date DATE NOT NULL,
-        return_date DATE,
-        status VARCHAR(50) DEFAULT 'borrowed',
-        notes TEXT,
-        fine_amount DECIMAL(10,2) DEFAULT 0.00,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
-    console.log('✅ Bookings table ready');
-
-    await db.query(`
-      CREATE TABLE IF NOT EXISTS security_logs (
-        id SERIAL PRIMARY KEY,
-        user_id INTEGER REFERENCES users(id),
-        action VARCHAR(100) NOT NULL,
-        status VARCHAR(50) NOT NULL,
-        ip_address VARCHAR(45),
-        user_agent TEXT,
-        details JSONB,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
-    console.log('✅ Security logs table ready');
-
-    await db.query(`
-      CREATE TABLE IF NOT EXISTS audit_logs (
-        id SERIAL PRIMARY KEY,
-        user_id INTEGER REFERENCES users(id),
-        action VARCHAR(100) NOT NULL,
-        entity_type VARCHAR(50),
-        entity_id INTEGER,
-        old_values JSONB,
-        new_values JSONB,
-        ip_address VARCHAR(45),
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
-    console.log('✅ Audit logs table ready');
-
-    await db.query(`
-      CREATE TABLE IF NOT EXISTS reviews (
-        id SERIAL PRIMARY KEY,
-        user_id INTEGER REFERENCES users(id),
-        book_id INTEGER REFERENCES books(id),
-        rating INTEGER CHECK (rating >= 1 AND rating <= 5),
-        comment TEXT,
-        is_approved BOOLEAN DEFAULT false,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE(user_id, book_id)
-      )
-    `);
-    console.log('✅ Reviews table ready');
-
-    // Check if admin user exists
-    const userCheck = await db.query("SELECT COUNT(*) as count FROM users");
+    // Test connection first
+    const testResult = await db.query('SELECT NOW()');
+    console.log('✅ Database connected at:', testResult.rows[0].now);
     
-    if (parseInt(userCheck.rows[0].count) === 0) {
+    const bcrypt = require('bcryptjs');
+    
+    // Create tables one by one with error handling
+    const tables = [
+      {
+        name: 'users',
+        sql: `CREATE TABLE IF NOT EXISTS users (
+          id SERIAL PRIMARY KEY,
+          name VARCHAR(255) NOT NULL,
+          email VARCHAR(255) UNIQUE NOT NULL,
+          password VARCHAR(255) NOT NULL,
+          role VARCHAR(50) DEFAULT 'user',
+          is_active BOOLEAN DEFAULT true,
+          reset_token VARCHAR(255),
+          otp_code VARCHAR(6),
+          otp_expiry TIMESTAMP,
+          refresh_token TEXT,
+          failed_login_attempts INTEGER DEFAULT 0,
+          locked_until TIMESTAMP,
+          last_login TIMESTAMP,
+          phone VARCHAR(20),
+          avatar_url TEXT,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )`
+      },
+      {
+        name: 'categories',
+        sql: `CREATE TABLE IF NOT EXISTS categories (
+          id SERIAL PRIMARY KEY,
+          name VARCHAR(100) NOT NULL,
+          description TEXT,
+          is_active BOOLEAN DEFAULT true,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )`
+      },
+      {
+        name: 'books',
+        sql: `CREATE TABLE IF NOT EXISTS books (
+          id SERIAL PRIMARY KEY,
+          title VARCHAR(255) NOT NULL,
+          author VARCHAR(255) NOT NULL,
+          isbn VARCHAR(20) UNIQUE,
+          publisher VARCHAR(255),
+          publication_year INTEGER,
+          description TEXT,
+          category_id INTEGER REFERENCES categories(id) ON DELETE SET NULL,
+          total_copies INTEGER DEFAULT 1,
+          available_copies INTEGER DEFAULT 1,
+          cover_image TEXT,
+          location VARCHAR(100),
+          is_active BOOLEAN DEFAULT true,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )`
+      },
+      {
+        name: 'bookings',
+        sql: `CREATE TABLE IF NOT EXISTS bookings (
+          id SERIAL PRIMARY KEY,
+          user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+          book_id INTEGER REFERENCES books(id) ON DELETE CASCADE,
+          issue_date DATE DEFAULT CURRENT_DATE,
+          due_date DATE NOT NULL,
+          return_date DATE,
+          status VARCHAR(50) DEFAULT 'borrowed',
+          notes TEXT,
+          fine_amount DECIMAL(10,2) DEFAULT 0.00,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )`
+      },
+      {
+        name: 'security_logs',
+        sql: `CREATE TABLE IF NOT EXISTS security_logs (
+          id SERIAL PRIMARY KEY,
+          user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+          action VARCHAR(100) NOT NULL,
+          status VARCHAR(50) NOT NULL,
+          ip_address VARCHAR(45),
+          user_agent TEXT,
+          details JSONB,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )`
+      },
+      {
+        name: 'audit_logs',
+        sql: `CREATE TABLE IF NOT EXISTS audit_logs (
+          id SERIAL PRIMARY KEY,
+          user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+          action VARCHAR(100) NOT NULL,
+          entity_type VARCHAR(50),
+          entity_id INTEGER,
+          old_values JSONB,
+          new_values JSONB,
+          ip_address VARCHAR(45),
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )`
+      }
+    ];
+
+    for (const table of tables) {
+      try {
+        await db.query(table.sql);
+        console.log(`✅ ${table.name} ready`);
+      } catch (err) {
+        console.error(`❌ ${table.name} error:`, err.message);
+      }
+    }
+
+    // Seed users if none exist
+    const userCount = await db.query('SELECT COUNT(*) as count FROM users');
+    if (parseInt(userCount.rows[0].count) === 0) {
       console.log('👤 Creating default users...');
       const hashedPassword = await bcrypt.hash('Password@123', 10);
       
@@ -294,64 +289,56 @@ async function initializeDatabase() {
         "INSERT INTO users (name, email, password, role) VALUES ($1, $2, $3, $4)",
         ['Admin User', 'admin@library.com', hashedPassword, 'librarian']
       );
-      console.log('✅ Admin created: admin@library.com');
-
       await db.query(
         "INSERT INTO users (name, email, password, role) VALUES ($1, $2, $3, $4)",
         ['John Doe', 'john@example.com', hashedPassword, 'user']
       );
-      console.log('✅ User created: john@example.com');
+      console.log('✅ Users seeded');
     }
 
-    // Check if categories exist
-    const catCheck = await db.query("SELECT COUNT(*) as count FROM categories");
-    
-    if (parseInt(catCheck.rows[0].count) === 0) {
-      console.log('📚 Creating default categories...');
-      const categories = ['Technology', 'Science', 'Literature', 'History', 'Mathematics'];
-      for (const cat of categories) {
-        await db.query(
-          "INSERT INTO categories (name, description) VALUES ($1, $2)",
-          [cat, `Books about ${cat.toLowerCase()}`]
-        );
+    // Seed categories if none exist
+    const catCount = await db.query('SELECT COUNT(*) as count FROM categories');
+    if (parseInt(catCount.rows[0].count) === 0) {
+      console.log('📚 Seeding categories...');
+      const cats = ['Technology', 'Science', 'Literature', 'History'];
+      for (const cat of cats) {
+        await db.query('INSERT INTO categories (name) VALUES ($1)', [cat]);
       }
-      console.log('✅ Categories created');
+      console.log('✅ Categories seeded');
     }
 
-    // Check if books exist
-    const bookCheck = await db.query("SELECT COUNT(*) as count FROM books");
-    
-    if (parseInt(bookCheck.rows[0].count) === 0) {
-      console.log('📖 Creating default books...');
-      const cats = await db.query("SELECT id, name FROM categories");
+    // Seed books if none exist
+    const bookCount = await db.query('SELECT COUNT(*) as count FROM books');
+    if (parseInt(bookCount.rows[0].count) === 0) {
+      console.log('📖 Seeding books...');
+      const cats = await db.query('SELECT id, name FROM categories');
       const catMap = {};
       cats.rows.forEach(c => { catMap[c.name] = c.id; });
 
       const books = [
-        { title: 'Clean Code', author: 'Robert C. Martin', category: 'Technology', copies: 5 },
-        { title: 'Design Patterns', author: 'Gang of Four', category: 'Technology', copies: 3 },
-        { title: 'A Brief History of Time', author: 'Stephen Hawking', category: 'Science', copies: 6 },
-        { title: 'To Kill a Mockingbird', author: 'Harper Lee', category: 'Literature', copies: 8 },
-        { title: '1984', author: 'George Orwell', category: 'Literature', copies: 7 },
-        { title: 'The Art of War', author: 'Sun Tzu', category: 'History', copies: 4 },
+        ['Clean Code', 'Robert C. Martin', 'Technology', 5],
+        ['A Brief History of Time', 'Stephen Hawking', 'Science', 6],
+        ['To Kill a Mockingbird', 'Harper Lee', 'Literature', 8],
+        ['1984', 'George Orwell', 'Literature', 7],
+        ['The Art of War', 'Sun Tzu', 'History', 4],
       ];
 
       for (const book of books) {
-        const catId = catMap[book.category];
+        const catId = catMap[book[2]];
         if (catId) {
           await db.query(
-            "INSERT INTO books (title, author, category_id, total_copies, available_copies) VALUES ($1, $2, $3, $4, $4)",
-            [book.title, book.author, catId, book.copies]
+            'INSERT INTO books (title, author, category_id, total_copies, available_copies) VALUES ($1, $2, $3, $4, $4)',
+            [book[0], book[1], catId, book[3]]
           );
         }
       }
-      console.log('✅ Books created');
+      console.log('✅ Books seeded');
     }
 
     console.log('🎉 Database initialization complete!\n');
   } catch (error) {
-    console.error('⚠️ Database init warning:', error.message);
-    // Don't crash - maybe tables already exist
+    console.error('❌ Database init failed:', error.message);
+    console.error('Make sure DATABASE_URL is set in Render environment variables');
   }
 }
 
