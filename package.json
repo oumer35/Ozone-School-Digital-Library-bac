@@ -7,6 +7,7 @@
     "start": "node server.js",
     "dev": "nodemon server.js",
     "seed": "node utils/seed.js",
+    "init-db": "node init-db.js",
     "create-tables": "node create-tables.js",
     "test": "jest"
   },
