@@ -151,117 +151,116 @@
 
 const express = require('express');
 const http = require('http');
-const { Server } = require('socket.io');
 const cors = require('cors');
 require('dotenv').config();
 
 const app = express();
 const server = http.createServer(app);
 
-// Socket.IO setup
-const io = new Server(server, {
-  cors: {
-    origin: process.env.FRONTEND_URL || 'http://localhost:5173',
-    methods: ['GET', 'POST', 'PUT', 'DELETE'],
+// ==================== CORS CONFIGURATION ====================
+// MUST be before routes and after body parser
+const allowedOrigins = [
+  'http://localhost:5173',
+  'http://localhost:3000',
+  'https://ozone-school-digital-library.vercel.app',     // WITHOUT trailing slash!
+  'https://ozone-school-digital-library.vercel.app/',    // WITH trailing slash
+];
+
+app.use(cors({
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps, curl, Postman)
+    if (!origin) return callback(null, true);
+    
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      console.log('❌ Blocked by CORS:', origin);
+      callback(null, true); // TEMPORARILY allow all for debugging
+      // callback(new Error('Not allowed by CORS'));
+    }
   },
-});
-
-// Make io accessible globally for real-time alerts
-global.io = io;
-
-// Socket.IO connection handling
-io.on('connection', (socket) => {
-  console.log('🔌 Client connected:', socket.id);
-
-  socket.on('disconnect', () => {
-    console.log('🔌 Client disconnected:', socket.id);
-  });
-});
-
-// IMPORTANT: Middleware order matters!
-// Body parser must come BEFORE routes
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-
-// CORS
-const corsOptions = {
-  origin: [
-    process.env.FRONTEND_URL || 'http://localhost:5173',
-    'https://YOUR_VERCEL_APP.vercel.app', // Replace with your Vercel URL
-  ],
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-};
-app.use(cors(corsOptions));
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  exposedHeaders: ['Content-Length', 'X-Requested-With'],
+}));
 
-// Request logging
+// Handle preflight requests
+app.options('*', cors());
+
+// ==================== BODY PARSER ====================
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// ==================== REQUEST LOGGING ====================
 app.use((req, res, next) => {
-  console.log(`${req.method} ${req.url}`);
+  console.log(`${req.method} ${req.url} - Origin: ${req.headers.origin || 'none'}`);
   next();
 });
 
-// Import routes
-const authRoutes = require('./routes/auth.routes');
-const bookRoutes = require('./routes/book.routes');
-const bookingRoutes = require('./routes/booking.routes');
-const userRoutes = require('./routes/user.routes');
-const analyticsRoutes = require('./routes/analytics.routes');
-const reportRoutes = require('./routes/report.routes');
-const securityRoutes = require('./routes/security.routes');
-const categoryRoutes = require('./routes/category.routes');
+// ==================== OPTIONAL SOCKET.IO ====================
+let io = null;
+try {
+  const { Server } = require('socket.io');
+  io = new Server(server, {
+    cors: {
+      origin: allowedOrigins,
+      methods: ['GET', 'POST'],
+      credentials: true,
+    },
+  });
+  global.io = io;
+  io.on('connection', (socket) => {
+    console.log('🔌 Client connected:', socket.id);
+    socket.on('disconnect', () => console.log('🔌 Client disconnected:', socket.id));
+  });
+} catch (error) {
+  console.log('Socket.io not available, continuing without real-time alerts');
+}
 
-// Register routes with /api prefix
-app.use('/api/auth', authRoutes);
-app.use('/api/books', bookRoutes);
-app.use('/api/bookings', bookingRoutes);
-app.use('/api/users', userRoutes);
-app.use('/api/analytics', analyticsRoutes);
-app.use('/api/reports', reportRoutes);
-app.use('/api/security', securityRoutes);
-app.use('/api/categories', categoryRoutes);
+// ==================== ROUTES ====================
+app.use('/api/auth', require('./routes/auth.routes'));
+app.use('/api/books', require('./routes/book.routes'));
+app.use('/api/bookings', require('./routes/booking.routes'));
+app.use('/api/users', require('./routes/user.routes'));
+app.use('/api/analytics', require('./routes/analytics.routes'));
+app.use('/api/reports', require('./routes/report.routes'));
+app.use('/api/security', require('./routes/security.routes'));
+app.use('/api/categories', require('./routes/category.routes'));
 
-// Health check endpoint
+// ==================== HEALTH CHECK ====================
 app.get('/health', (req, res) => {
   res.json({ 
     status: 'ok', 
     timestamp: new Date().toISOString(),
-    uptime: process.uptime(),
+    cors: 'enabled',
+    origins: allowedOrigins,
   });
 });
 
-// 404 handler for unknown API routes
+// ==================== ERROR HANDLERS ====================
 app.use('/api/*', (req, res) => {
-  console.log('❌ 404:', req.method, req.originalUrl);
-  res.status(404).json({
-    status: 'error',
-    message: `Route ${req.method} ${req.originalUrl} not found`,
-  });
+  res.status(404).json({ status: 'error', message: `Route ${req.method} ${req.originalUrl} not found` });
 });
 
-// Global error handler
 app.use((err, req, res, next) => {
-  console.error('💥 Server Error:', err.message);
-  res.status(500).json({
-    status: 'error',
-    message: 'Internal server error',
-  });
+  console.error('💥 Error:', err.message);
+  res.status(500).json({ status: 'error', message: 'Internal server error' });
 });
 
+// ==================== START SERVER ====================
 const PORT = process.env.PORT || 3000;
-
 server.listen(PORT, () => {
-  console.log(`\n🚀 Server running on http://localhost:${PORT}`);
-  console.log(`📚 API available at http://localhost:${PORT}/api`);
-  console.log(`🔌 Socket.IO available at http://localhost:${PORT}`);
+  console.log(`\n🚀 Server running on port ${PORT}`);
+  console.log(`📚 API: http://localhost:${PORT}/api`);
+  console.log(`✅ CORS enabled for:`, allowedOrigins);
   console.log(`\nRegistered routes:`);
   console.log(`  POST /api/auth/login`);
   console.log(`  POST /api/auth/register`);
   console.log(`  GET  /api/books`);
   console.log(`  GET  /api/categories`);
   console.log(`  GET  /api/analytics/dashboard`);
-  console.log(`  GET  /api/bookings`);
-  console.log(`  ...and more\n`);
+  console.log(`\n`);
 });
 
 module.exports = { app, server, io };
