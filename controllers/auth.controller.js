@@ -1008,10 +1008,25 @@ exports.register = async (req, res) => {
   try {
     const { name, email, password } = req.body;
 
+    // Validate input
+    if (!name || !email || !password) {
+      return res.status(400).json({ 
+        status: 'error',
+        message: 'Name, email, and password are required' 
+      });
+    }
+
+    if (password.length < 8) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Password must be at least 8 characters'
+      });
+    }
+
     // Check if user already exists
     const existingUser = await db.query(
       'SELECT id FROM users WHERE email = $1',
-      [email.toLowerCase()]
+      [email.toLowerCase().trim()]
     );
 
     if (existingUser.rows.length > 0) {
@@ -1022,7 +1037,7 @@ exports.register = async (req, res) => {
     }
 
     // Hash password
-    const saltRounds = parseInt(process.env.BCRYPT_SALT_ROUNDS) || 10;
+    const saltRounds = 10;
     const hashedPassword = await bcrypt.hash(password, saltRounds);
 
     // Create user
@@ -1030,7 +1045,7 @@ exports.register = async (req, res) => {
       `INSERT INTO users (name, email, password, role) 
        VALUES ($1, $2, $3, 'user') 
        RETURNING id, name, email, role, created_at`,
-      [name, email.toLowerCase(), hashedPassword]
+      [name.trim(), email.toLowerCase().trim(), hashedPassword]
     );
 
     const user = result.rows[0];
@@ -1038,24 +1053,31 @@ exports.register = async (req, res) => {
     // Generate JWT token
     const token = generateToken(user);
 
-    // Log audit
-    await auditLogger.log({
-      user_id: user.id,
-      action: 'REGISTER',
-      entity_type: 'users',
-      entity_id: user.id,
-      ip_address: req.ip,
-      user_agent: req.get('user-agent'),
-    });
+    // Try to log audit (don't fail if it fails)
+    try {
+      await auditLogger.log({
+        user_id: user.id,
+        action: 'REGISTER',
+        entity_type: 'users',
+        entity_id: user.id,
+        ip_address: req.ip,
+        user_agent: req.get('user-agent'),
+      });
+    } catch (auditError) {
+      console.error('Audit log failed (non-critical):', auditError.message);
+    }
 
-    // Send welcome email (non-blocking)
-    sendEmail({
-      to: user.email,
-      subject: 'Welcome to Library Management System',
-      html: `<h1>Welcome ${user.name}!</h1>
-             <p>Your account has been created successfully.</p>
-             <p>You can now log in and start browsing our library.</p>`,
-    }).catch(err => console.error('Welcome email failed:', err));
+    // Try to send welcome email (non-blocking, don't fail if it fails)
+    try {
+      sendEmail({
+        to: user.email,
+        subject: 'Welcome to Library Management System',
+        html: `<h1>Welcome ${user.name}!</h1>
+               <p>Your account has been created successfully.</p>`,
+      }).catch(err => console.error('Welcome email failed (non-critical):', err.message));
+    } catch (emailError) {
+      console.error('Email setup failed (non-critical):', emailError.message);
+    }
 
     res.status(201).json({
       status: 'success',
@@ -1066,10 +1088,10 @@ exports.register = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error('Registration error:', error);
+    console.error('Registration error:', error.message);
     res.status(500).json({
       status: 'error',
-      message: 'Error during registration',
+      message: 'Error during registration: ' + error.message,
     });
   }
 };
