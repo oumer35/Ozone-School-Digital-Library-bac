@@ -1166,16 +1166,18 @@ exports.login = async (req, res) => {
     );
 
     // Generate JWT token
-    const jwtSecret = process.env.JWT_SECRET || 'fallback_secret_key_change_this';
-    const token = jwt.sign(
-      { 
-        id: user.id, 
-        email: user.email, 
-        role: user.role 
-      },
-      jwtSecret,
-      { expiresIn: '1d' }
-    );
+    const JWT_SECRET = process.env.JWT_SECRET || 'fallback_secret_key_for_development';
+  console.log('🔑 Signing token with secret length:', JWT_SECRET.length);
+
+  const token = jwt.sign(
+    { 
+      id: user.id, 
+      email: user.email, 
+      role: user.role 
+    },
+    JWT_SECRET,
+    { expiresIn: '7d' }
+  );
 
     // Remove sensitive data before sending response
     const { 
